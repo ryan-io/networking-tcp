@@ -4,9 +4,7 @@
 project(networking)
 # project commands
 include_directories(networking PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include) # use '${CMAKE_CURRENT_SOURCE_DIR}' for library headers
-add_library(networking src/networking-tcp.cpp) # do not include header files
-
-# library commands
+add_library(networking STATIC src/networking-tcp.cpp) # do not include header files, ideally, link via STATIC, not SHARED	
 find_package(Boost REQUIRED)
 include_directories(PUBLIC ${Boost_INCLUDE_DIRS})
 

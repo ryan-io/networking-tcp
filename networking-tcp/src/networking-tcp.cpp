@@ -1,18 +1,28 @@
 #include "networking-tcp/networking-tcp.h"
+#include <iostream> 
 #include <stdexcept>
-#include <iostream>
+
 
 /// @brief Assuming the server is in a valid state (running)
-//        and the port is open, this method will start the server.
+///        and the port is open, this method will start the server.
+/// this method will invoke io_context.run()
 /// @return     0 if successful, -1 if an error occurred.
-int tcp::Server::Start() const
-{
-	try
-	{
-		m_ioContext.run();
+///	-2 if the server is already running.
+int tcp::Server::Start() {
+	if (m_isRunning) {
+		std::cout << "Server is already running." << '\n';
+		return -2;
 	}
-	catch (const std::exception &e)
-	{
+
+	std::cout << "Server is starting..." << '\n';
+	m_isRunning = true;
+
+	try {
+		Run();
+		// why explained here: https://www.boost.org/doc/libs/1_86_0/doc/html/boost_asio/tutorial/tutdaytime3.html
+		// this should be invoked in an application entry point so it will perform asynchronous operations
+	}
+	catch (const std::exception& e) {
 		std::cerr << e.what() << '\n';
 		return -1;
 	}
@@ -20,13 +30,11 @@ int tcp::Server::Start() const
 	return 0;
 }
 
-const std::string& tcp::Server::GetPort() const
-{
+unsigned short tcp::Server::GetPort() const {
 	return m_port;
 }
 
-boost::asio::ip::tcp tcp::Server::GetIpVersion() const
-{
+boost::asio::ip::tcp tcp::Server::GetIpVersion() const {
 	return m_ipVersion;
 }
 
@@ -36,21 +44,75 @@ boost::asio::ip::tcp tcp::Server::GetIpVersion() const
 /// @param ioContext Reference to the IO context. This class does NOT managed your reference.
 tcp::Server::Server(
 	const std::string& port,
-	boost::asio::io_context &ioContext,
-	const IpVersion version) : m_port(port),
-							   m_ipVersion(version == IpVersion::IPV4
-											   ? boost::asio::ip::tcp::v4()
-											   : boost::asio::ip::tcp::v6()),
-							   m_acceptor(boost::asio::ip::tcp::acceptor(ioContext,
-																		 boost::asio::ip::tcp::endpoint(m_ipVersion,
-																			 std::stoi(port)))),
-							   m_ioContext(ioContext)
-{
-	if (port.empty())
-	{
+	boost::asio::io_context& ioContext,
+	const IpVersion version) : m_port(static_cast<unsigned short>(std::stoi(port))),
+	m_ipVersion(version == IPV4
+		? boost::asio::ip::tcp::v4()
+		: boost::asio::ip::tcp::v6()),
+	m_acceptor(boost::asio::ip::tcp::acceptor(ioContext,
+		boost::asio::ip::tcp::endpoint(
+			m_ipVersion,
+			static_cast<unsigned short>(std::stoi(port))))),
+	m_ioContext(ioContext) {
+	if (port.empty()) {
 		throw std::invalid_argument("Port cannot be empty - please specify.");
 	}
+
+	std::cout << "Server created - PORT: " << m_port << '\n';
+	Start();	// needs to be invoked from in here -> correct pointer
+}
+
+boost::asio::io_context& tcp::Server::GetContext() const {
+	return m_ioContext;
+}
+
+/// creates a connection and defines an endpoint to the server
+void tcp::Server::Run() {
+	using namespace boost::asio;
+
+	auto connectionPtr = Connection::Create(m_ioContext);
+	m_connections.push_back(connectionPtr);
+	m_acceptor.async_accept(connectionPtr->GetSocket(),
+		std::bind(&tcp::Server::Handle, this, connectionPtr, boost::asio::placeholders::error));
+}
+
+// if the server is running, stop it; early return if not
+void tcp::Server::Stop() {
+	if (!m_isRunning) {
+		return;
+	}
+
+	std::cout << "Server is stopping..." << '\n';
+	m_isRunning = false;
+	m_acceptor.cancel();
+	m_ioContext.stop();
+	m_acceptor.close();
+}
+
+void tcp::Server::Handle(ConnectionPtr& ptr, const boost::system::error_code& error) {
+	if (!error) {
+		std::cout << "Writing..." << '\n';
+		std::string message = "Hello from server!";
+		ptr->Write();
+	}
+
+	Run();
+}
+
+void tcp::Connection::HandleWrite() {
+	std::cout << "Data written to client." << '\n';
+}
+
+void tcp::Connection::Write() {
+	// this is the information that is written to all clients when invoked
+	std::string msg = "hello";
+	boost::asio::async_write(m_socket, 
+		boost::asio::buffer(msg), 
+		std::bind(&tcp::Connection::HandleWrite, this));
+		
 }
 
 /// @brief Default implementation
-tcp::Server::~Server() = default;
+tcp::Server::~Server() {
+	Stop();
+}
