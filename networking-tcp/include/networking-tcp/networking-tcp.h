@@ -27,6 +27,7 @@ namespace tcp {
 			const std::string& port,
 			const IpVersion version) {
 			TcpServer ptr = std::make_unique<Server>(port, ioContext, version);
+
 			return ptr;
 		}
 
